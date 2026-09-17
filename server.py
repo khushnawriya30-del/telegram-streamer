@@ -1,18 +1,21 @@
 import os
 import re
-import math
 import mimetypes
+import logging
 from typing import Dict, Any
 from aiohttp import web
 from pyrogram import Client, filters
 from pyrogram.types import Message
 import aiohttp
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("telegram-streamer")
+
 API_ID = int(os.environ.get("API_ID", "32313888"))
 API_HASH = os.environ.get("API_HASH", "a2ca24e548f99aedd831a9f6072a57f4")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8982179760:AAHSjueoPpgQmBJfjIlfRebxbA45m0y595w")
 BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "-1004457425617"))
-PORT = int(os.environ.get("PORT", 8080))
+PORT = int(os.environ.get("PORT", 10000))
 FQDN = os.environ.get("FQDN", "")
 
 bot = Client(
@@ -20,7 +23,8 @@ bot = Client(
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
-    workers=10
+    workers=10,
+    in_memory=True
 )
 
 async def get_file_properties(message: Message) -> Dict[str, Any]:
@@ -46,6 +50,7 @@ async def stream_handler(request: web.Request) -> web.StreamResponse:
     try:
         msg = await bot.get_messages(BIN_CHANNEL, message_id)
     except Exception as e:
+        logger.error(f"Message retrieval error: {e}")
         return web.Response(status=404, text=f"Message not found: {e}")
 
     file_props = await get_file_properties(msg)
@@ -87,16 +92,13 @@ async def stream_handler(request: web.Request) -> web.StreamResponse:
     response = web.StreamResponse(status=status_code, headers=headers)
     await response.prepare(request)
 
-    chunk_size = 1024 * 512 # 512 KB chunks for smooth streaming
-    offset = from_bytes
-
     try:
         async for chunk in bot.stream_media(msg, offset=from_bytes, limit=length):
             await response.write(chunk)
     except (ConnectionResetError, aiohttp.ClientConnectionResetError):
         pass
     except Exception as e:
-        print(f"Streaming error: {e}")
+        logger.error(f"Streaming write error: {e}")
 
     await response.write_eof()
     return response
@@ -109,13 +111,9 @@ async def health_handler(request: web.Request) -> web.Response:
         "version": "2.0"
     }, headers={"Access-Control-Allow-Origin": "*"})
 
-# Telegram Bot Message Listener
 @bot.on_message(filters.chat(BIN_CHANNEL) & (filters.video | filters.document))
 async def on_channel_video(client: Client, message: Message):
-    base_url = FQDN or f"http://localhost:{PORT}"
-    if not base_url.startswith("http"):
-        base_url = f"https://{base_url}"
-    
+    base_url = FQDN or "https://hindianime-telegram-streamer.onrender.com"
     stream_url = f"{base_url}/stream/{message.id}"
     file_props = await get_file_properties(message)
     file_name = file_props.get("file_name", "Anime Video")
@@ -130,28 +128,25 @@ async def on_channel_video(client: Client, message: Message):
     try:
         await message.reply_text(caption, disable_web_page_preview=True)
     except Exception as e:
-        print(f"Reply error: {e}")
+        logger.error(f"Reply error: {e}")
 
-async def init_app() -> web.Application:
+async def on_startup(app):
+    await bot.start()
+    logger.info(f"Telegram Bot started as @{bot.me.username}")
+
+async def on_cleanup(app):
+    await bot.stop()
+    logger.info("Telegram Bot stopped")
+
+def create_app():
     app = web.Application()
+    app.on_startup.append(on_startup)
+    app.on_cleanup.append(on_cleanup)
     app.router.add_get("/", health_handler)
     app.router.add_get("/health", health_handler)
     app.router.add_get("/stream/{message_id}", stream_handler)
     return app
 
-async def start_server():
-    await bot.start()
-    print(f"Telegram Bot started as @{bot.me.username}")
-
-    app = await init_app()
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
-    await site.start()
-    print(f"Web streamer listening on port {PORT}")
-
 if __name__ == "__main__":
-    import asyncio
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_server())
-    loop.run_forever()
+    app = create_app()
+    web.run_app(app, host="0.0.0.0", port=PORT)
