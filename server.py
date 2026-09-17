@@ -30,7 +30,6 @@ BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "-1004457425617"))
 PORT = int(os.environ.get("PORT", 10000))
 FQDN = os.environ.get("FQDN", "https://hindianime-telegram-streamer.onrender.com")
 
-# Initialize client using permanent pre-authenticated session_string (zero flood wait)
 bot = Client(
     "stream_bot",
     api_id=API_ID,
@@ -83,6 +82,7 @@ async def watch_handler(request: web.Request) -> web.Response:
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
   <style>
     * {{ margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; }}
@@ -94,13 +94,13 @@ async def watch_handler(request: web.Request) -> web.Response:
     .meta-box {{ margin-top: 16px; background: #0f172a; padding: 16px 20px; border-radius: 10px; border: 1px solid #1e293b; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }}
     .title-box h1 {{ font-size: 16px; font-weight: 600; color: #f8fafc; margin-bottom: 4px; }}
     .title-box span {{ font-size: 13px; color: #94a3b8; }}
-    .btn-group {{ display: flex; gap: 10px; }}
+    .btn-group {{ display: flex; gap: 10px; flex-wrap: wrap; }}
     .btn {{ display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; border: none; transition: 0.2s; }}
     .btn-primary {{ background: #ff640a; color: #fff; }}
     .btn-primary:hover {{ background: #ea580c; }}
     .btn-secondary {{ background: #1e293b; color: #cbd5e1; }}
     .btn-secondary:hover {{ background: #334155; color: #fff; }}
-    .toast {{ position: fixed; bottom: 24px; right: 24px; background: #22c55e; color: #fff; padding: 10px 18px; border-radius: 6px; font-size: 13px; display: none; }}
+    .toast {{ position: fixed; bottom: 24px; right: 24px; background: #22c55e; color: #fff; padding: 10px 18px; border-radius: 6px; font-size: 13px; display: none; z-index: 999; }}
   </style>
 </head>
 <body>
@@ -119,6 +119,9 @@ async def watch_handler(request: web.Request) -> web.Response:
         <span>File Size: <strong>{size_mb} MB</strong> &bull; Direct Cloud Stream</span>
       </div>
       <div class="btn-group">
+        <button onclick="switchMpegTs()" class="btn btn-secondary" title="Use if default player shows Video Load Failed">
+          <i class="fa-solid fa-sliders"></i> Force TS/MKV Decoder
+        </button>
         <a href="{download_url}" class="btn btn-secondary">
           <i class="fa-solid fa-download"></i> Download
         </a>
@@ -132,6 +135,24 @@ async def watch_handler(request: web.Request) -> web.Response:
   <div id="toast" class="toast">Link copied to clipboard!</div>
 
   <script>
+    let mpegtsPlayer = null;
+
+    function playWithMpegTs(videoElement) {{
+      if (mpegtsPlayer) return;
+      if (mpegts.isSupported()) {{
+        console.log('Starting mpegts.js player...');
+        mpegtsPlayer = mpegts.createPlayer({{
+          type: 'mpegts',
+          isLive: false,
+          url: '{stream_url}'
+        }});
+        mpegtsPlayer.attachMediaElement(videoElement);
+        mpegtsPlayer.load();
+        mpegtsPlayer.play().catch(e => console.log('play catch:', e));
+        if (window.art) window.art.notice.show = 'Decoded via MPEG-TS Engine';
+      }}
+    }}
+
     const art = new Artplayer({{
       container: '#artplayer',
       url: '{stream_url}',
@@ -147,15 +168,39 @@ async def watch_handler(request: web.Request) -> web.Response:
       theme: '#ff640a',
       fullscreen: true,
       fullscreenWeb: true,
+      customType: {{
+        ts: function(video, url) {{ playWithMpegTs(video); }},
+        m2ts: function(video, url) {{ playWithMpegTs(video); }},
+        mp2t: function(video, url) {{ playWithMpegTs(video); }}
+      }}
     }});
+    window.art = art;
+
+    // Auto fallback if native player fails to decode format
+    art.on('error', (err) => {{
+      console.warn('Native video error, falling back to mpegts.js engine...', err);
+      playWithMpegTs(art.video);
+    }});
+
+    function switchMpegTs() {{
+      if (window.art && window.art.video) {{
+        playWithMpegTs(window.art.video);
+        showToast('MPEG-TS Engine Activated!');
+      }}
+    }}
 
     function copyStreamLink() {{
       const link = window.location.origin + '{stream_url}';
       navigator.clipboard.writeText(link).then(() => {{
-        const t = document.getElementById('toast');
-        t.style.display = 'block';
-        setTimeout(() => t.style.display = 'none', 2500);
+        showToast('Stream link copied to clipboard!');
       }});
+    }}
+
+    function showToast(text) {{
+      const t = document.getElementById('toast');
+      t.innerText = text;
+      t.style.display = 'block';
+      setTimeout(() => t.style.display = 'none', 2500);
     }}
   </script>
 </body>
@@ -266,7 +311,7 @@ async def health_handler(request: web.Request) -> web.Response:
         "status": "online",
         "service": "HindiAnime Telegram Streamer",
         "channel": BIN_CHANNEL,
-        "version": "3.0"
+        "version": "3.1"
     }, headers={"Access-Control-Allow-Origin": "*"})
 
 # When user starts bot in DM
