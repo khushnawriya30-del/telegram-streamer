@@ -5,7 +5,7 @@ import logging
 import asyncio
 from typing import Dict, Any
 
-# Ensure an asyncio event loop exists on Python 3.11/3.12/3.13+ before importing/initializing clients
+# Ensure an asyncio event loop exists before importing/initializing clients
 try:
     loop = asyncio.get_event_loop()
 except RuntimeError:
@@ -101,9 +101,37 @@ async def stream_handler(request: web.Request) -> web.StreamResponse:
     response = web.StreamResponse(status=status_code, headers=headers)
     await response.prepare(request)
 
+    # HEAD requests only need headers
+    if request.method == "HEAD":
+        await response.write_eof()
+        return response
+
+    # 1 MiB chunk size for Telegram media streaming
+    part_size = 1024 * 1024
+    first_part = from_bytes // part_size
+    last_part = until_bytes // part_size
+    offset_chunks = first_part
+    limit_chunks = (last_part - first_part) + 1
+
+    bytes_to_skip = from_bytes % part_size
+    remaining_bytes = length
+
     try:
-        async for chunk in bot.stream_media(msg, offset=from_bytes, limit=length):
+        async for chunk in bot.stream_media(msg, offset=offset_chunks, limit=limit_chunks):
+            if remaining_bytes <= 0:
+                break
+            if bytes_to_skip > 0:
+                if len(chunk) <= bytes_to_skip:
+                    bytes_to_skip -= len(chunk)
+                    continue
+                chunk = chunk[bytes_to_skip:]
+                bytes_to_skip = 0
+
+            if len(chunk) > remaining_bytes:
+                chunk = chunk[:remaining_bytes]
+
             await response.write(chunk)
+            remaining_bytes -= len(chunk)
     except (ConnectionResetError, aiohttp.ClientConnectionResetError):
         pass
     except Exception as e:
@@ -117,7 +145,7 @@ async def health_handler(request: web.Request) -> web.Response:
         "status": "online",
         "service": "HindiAnime Telegram Streamer",
         "channel": BIN_CHANNEL,
-        "version": "2.0"
+        "version": "2.1"
     }, headers={"Access-Control-Allow-Origin": "*"})
 
 @bot.on_message(filters.chat(BIN_CHANNEL) & (filters.video | filters.document))
@@ -153,7 +181,7 @@ def create_app():
     app.on_cleanup.append(on_cleanup)
     app.router.add_get("/", health_handler)
     app.router.add_get("/health", health_handler)
-    app.router.add_get("/stream/{message_id}", stream_handler)
+    app.router.add_route("*", "/stream/{message_id}", stream_handler)
     return app
 
 if __name__ == "__main__":
