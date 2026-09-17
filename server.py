@@ -207,12 +207,25 @@ async def on_cleanup(app):
     await bot.stop()
     logger.info("Telegram Bot stopped")
 
+async def debug_handler(request: web.Request) -> web.Response:
+    try:
+        message_id = int(request.match_info["message_id"])
+        msg = await bot.get_messages(BIN_CHANNEL, message_id)
+        props = await get_file_properties(msg)
+        async for chunk in bot.stream_media(msg, limit=1):
+            return web.Response(text=f"SUCCESS: Read {len(chunk)} bytes from {props.get('file_name')}")
+        return web.Response(text="No chunk yielded")
+    except Exception as e:
+        import traceback
+        return web.Response(text=f"ERROR: {type(e).__name__}: {e}\n\n{traceback.format_exc()}", status=500)
+
 def create_app():
     app = web.Application()
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
     app.router.add_get("/", health_handler)
     app.router.add_get("/health", health_handler)
+    app.router.add_get("/debug/{message_id}", debug_handler)
     app.router.add_route("*", "/stream/{message_id}", stream_handler)
     return app
 
