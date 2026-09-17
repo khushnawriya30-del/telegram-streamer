@@ -1,5 +1,6 @@
 aiohttp>=3.9.0
 hydrogram>=0.2.0
+tgcrypto>=1.2.5
 aiofiles>=23.2.1
 requests>=2.31.0
 pyaes>=1.6.1

@@ -131,6 +131,7 @@ async def stream_handler(request: web.Request) -> web.StreamResponse:
                 chunk = chunk[:remaining_bytes]
 
             await response.write(chunk)
+            await response.drain()
             remaining_bytes -= len(chunk)
     except (ConnectionResetError, aiohttp.ClientConnectionResetError):
         pass
@@ -145,7 +146,7 @@ async def health_handler(request: web.Request) -> web.Response:
         "status": "online",
         "service": "HindiAnime Telegram Streamer",
         "channel": BIN_CHANNEL,
-        "version": "2.1"
+        "version": "2.2"
     }, headers={"Access-Control-Allow-Origin": "*"})
 
 @bot.on_message(filters.chat(BIN_CHANNEL) & (filters.video | filters.document))
