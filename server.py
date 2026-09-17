@@ -2,10 +2,19 @@ import os
 import re
 import mimetypes
 import logging
+import asyncio
 from typing import Dict, Any
+
+# Ensure an asyncio event loop exists on Python 3.11/3.12/3.13+ before importing/initializing clients
+try:
+    loop = asyncio.get_event_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
 from aiohttp import web
-from pyrogram import Client, filters
-from pyrogram.types import Message
+from hydrogram import Client, filters
+from hydrogram.types import Message
 import aiohttp
 
 logging.basicConfig(level=logging.INFO)
