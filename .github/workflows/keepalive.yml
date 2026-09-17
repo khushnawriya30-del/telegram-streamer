@@ -1,0 +1,15 @@
+name: 24x7 Keep-Alive Ping
+
+on:
+  schedule:
+    # Runs every 10 minutes to prevent Render free instance from sleeping
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Streamer Health Endpoint
+        run: |
+          curl -s -i "https://hindianime-telegram-streamer.onrender.com/health"
