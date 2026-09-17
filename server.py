@@ -25,7 +25,7 @@ API_HASH = os.environ.get("API_HASH", "a2ca24e548f99aedd831a9f6072a57f4")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8982179760:AAHSjueoPpgQmBJfjIlfRebxbA45m0y595w")
 BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "-1004457425617"))
 PORT = int(os.environ.get("PORT", 10000))
-FQDN = os.environ.get("FQDN", "")
+FQDN = os.environ.get("FQDN", "https://hindianime-telegram-streamer.onrender.com")
 
 bot = Client(
     "stream_bot",
@@ -146,13 +146,44 @@ async def health_handler(request: web.Request) -> web.Response:
         "status": "online",
         "service": "HindiAnime Telegram Streamer",
         "channel": BIN_CHANNEL,
-        "version": "2.2"
+        "version": "2.3"
     }, headers={"Access-Control-Allow-Origin": "*"})
 
+# When user starts bot in DM
+@bot.on_message(filters.private & filters.command("start"))
+async def on_start(client: Client, message: Message):
+    await message.reply_text(
+        "👋 **Namaste! HindiAnime Streamer Bot me aapka swagat hai.**\n\n"
+        "⚡ Mujhe koi bhi Anime Video ya Document send ya forward kijiye.\n"
+        "Main turant aapko website ke liye **High Speed 24x7 Direct Streaming Link** generate karke de dunga!"
+    )
+
+# When user sends or forwards video to bot in private DM
+@bot.on_message(filters.private & (filters.video | filters.document | filters.audio | filters.animation))
+async def on_private_media(client: Client, message: Message):
+    status_msg = await message.reply_text("⏳ *Generating Fast Stream Link...*", quote=True)
+    try:
+        forwarded = await message.forward(BIN_CHANNEL)
+        stream_url = f"{FQDN}/stream/{forwarded.id}"
+        file_props = await get_file_properties(message)
+        file_name = file_props.get("file_name", "Anime Video")
+        size_mb = round(file_props.get("file_size", 0) / (1024 * 1024), 2)
+
+        caption = (
+            f"🎬 **File:** `{file_name}`\n"
+            f"📦 **Size:** `{size_mb} MB`\n\n"
+            f"🔗 **Web Stream Link:**\n`{stream_url}`\n\n"
+            f"👉 Is link ko HindiAnime website ke player me use karein!"
+        )
+        await status_msg.edit_text(caption, disable_web_page_preview=True)
+    except Exception as e:
+        logger.error(f"Private media error: {e}")
+        await status_msg.edit_text(f"❌ Error: {e}")
+
+# When video is posted directly into the channel
 @bot.on_message(filters.chat(BIN_CHANNEL) & (filters.video | filters.document))
 async def on_channel_video(client: Client, message: Message):
-    base_url = FQDN or "https://hindianime-telegram-streamer.onrender.com"
-    stream_url = f"{base_url}/stream/{message.id}"
+    stream_url = f"{FQDN}/stream/{message.id}"
     file_props = await get_file_properties(message)
     file_name = file_props.get("file_name", "Anime Video")
     size_mb = round(file_props.get("file_size", 0) / (1024 * 1024), 2)
@@ -166,7 +197,7 @@ async def on_channel_video(client: Client, message: Message):
     try:
         await message.reply_text(caption, disable_web_page_preview=True)
     except Exception as e:
-        logger.error(f"Reply error: {e}")
+        logger.info(f"Note on channel reply: {e}")
 
 async def on_startup(app):
     await bot.start()
