@@ -307,11 +307,13 @@ async def stream_handler(request: web.Request) -> web.StreamResponse:
     return response
 
 async def health_handler(request: web.Request) -> web.Response:
+    import shutil
     return web.json_response({
         "status": "online",
         "service": "HindiAnime Telegram Streamer",
         "channel": BIN_CHANNEL,
-        "version": "3.1"
+        "ffmpeg": shutil.which("ffmpeg"),
+        "version": "3.2"
     }, headers={"Access-Control-Allow-Origin": "*"})
 
 # When user starts bot in DM
