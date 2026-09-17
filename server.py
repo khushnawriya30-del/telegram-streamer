@@ -1,0 +1,157 @@
+import os
+import re
+import math
+import mimetypes
+from typing import Dict, Any
+from aiohttp import web
+from pyrogram import Client, filters
+from pyrogram.types import Message
+import aiohttp
+
+API_ID = int(os.environ.get("API_ID", "32313888"))
+API_HASH = os.environ.get("API_HASH", "a2ca24e548f99aedd831a9f6072a57f4")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8982179760:AAHSjueoPpgQmBJfjIlfRebxbA45m0y595w")
+BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "-1004457425617"))
+PORT = int(os.environ.get("PORT", 8080))
+FQDN = os.environ.get("FQDN", "")
+
+bot = Client(
+    "stream_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    workers=10
+)
+
+async def get_file_properties(message: Message) -> Dict[str, Any]:
+    media = message.video or message.document or message.audio or message.animation
+    if not media:
+        return {}
+    file_name = getattr(media, "file_name", None) or f"video_{message.id}.mp4"
+    file_size = getattr(media, "file_size", 0)
+    mime_type = getattr(media, "mime_type", None) or mimetypes.guess_type(file_name)[0] or "video/mp4"
+    return {
+        "file_name": file_name,
+        "file_size": file_size,
+        "mime_type": mime_type,
+        "media": media
+    }
+
+async def stream_handler(request: web.Request) -> web.StreamResponse:
+    try:
+        message_id = int(request.match_info["message_id"])
+    except ValueError:
+        return web.Response(status=400, text="Invalid message ID")
+
+    try:
+        msg = await bot.get_messages(BIN_CHANNEL, message_id)
+    except Exception as e:
+        return web.Response(status=404, text=f"Message not found: {e}")
+
+    file_props = await get_file_properties(msg)
+    if not file_props:
+        return web.Response(status=404, text="No streamable media found in this message")
+
+    file_size = file_props["file_size"]
+    file_name = file_props["file_name"]
+    mime_type = file_props["mime_type"]
+
+    range_header = request.headers.get("Range")
+    from_bytes = 0
+    until_bytes = file_size - 1
+
+    status_code = 200
+    if range_header:
+        range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            status_code = 206
+            from_bytes = int(range_match.group(1))
+            if range_match.group(2):
+                until_bytes = int(range_match.group(2))
+
+    length = until_bytes - from_bytes + 1
+
+    headers = {
+        "Content-Type": mime_type,
+        "Content-Disposition": f'inline; filename="{file_name}"',
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Range, Content-Type",
+        "Content-Length": str(length),
+    }
+
+    if status_code == 206:
+        headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"
+
+    response = web.StreamResponse(status=status_code, headers=headers)
+    await response.prepare(request)
+
+    chunk_size = 1024 * 512 # 512 KB chunks for smooth streaming
+    offset = from_bytes
+
+    try:
+        async for chunk in bot.stream_media(msg, offset=from_bytes, limit=length):
+            await response.write(chunk)
+    except (ConnectionResetError, aiohttp.ClientConnectionResetError):
+        pass
+    except Exception as e:
+        print(f"Streaming error: {e}")
+
+    await response.write_eof()
+    return response
+
+async def health_handler(request: web.Request) -> web.Response:
+    return web.json_response({
+        "status": "online",
+        "service": "HindiAnime Telegram Streamer",
+        "channel": BIN_CHANNEL,
+        "version": "2.0"
+    }, headers={"Access-Control-Allow-Origin": "*"})
+
+# Telegram Bot Message Listener
+@bot.on_message(filters.chat(BIN_CHANNEL) & (filters.video | filters.document))
+async def on_channel_video(client: Client, message: Message):
+    base_url = FQDN or f"http://localhost:{PORT}"
+    if not base_url.startswith("http"):
+        base_url = f"https://{base_url}"
+    
+    stream_url = f"{base_url}/stream/{message.id}"
+    file_props = await get_file_properties(message)
+    file_name = file_props.get("file_name", "Anime Video")
+    size_mb = round(file_props.get("file_size", 0) / (1024 * 1024), 2)
+
+    caption = (
+        f"🎬 **{file_name}**\n"
+        f"📦 Size: `{size_mb} MB`\n\n"
+        f"🔗 **Fast Web Stream Link:**\n`{stream_url}`\n\n"
+        f"👉 Use this link in HindiAnime website episode player!"
+    )
+    try:
+        await message.reply_text(caption, disable_web_page_preview=True)
+    except Exception as e:
+        print(f"Reply error: {e}")
+
+async def init_app() -> web.Application:
+    app = web.Application()
+    app.router.add_get("/", health_handler)
+    app.router.add_get("/health", health_handler)
+    app.router.add_get("/stream/{message_id}", stream_handler)
+    return app
+
+async def start_server():
+    await bot.start()
+    print(f"Telegram Bot started as @{bot.me.username}")
+
+    app = await init_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    print(f"Web streamer listening on port {PORT}")
+
+if __name__ == "__main__":
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_server())
+    loop.run_forever()

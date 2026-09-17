@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: telegram-streamer
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: API_ID
+        value: "32313888"
+      - key: API_HASH
+        value: "a2ca24e548f99aedd831a9f6072a57f4"
+      - key: BOT_TOKEN
+        value: "8982179760:AAHSjueoPpgQmBJfjIlfRebxbA45m0y595w"
+      - key: BIN_CHANNEL
+        value: "-1004457425617"
+      - key: PORT
+        value: "10000"

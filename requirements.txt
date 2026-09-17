@@ -1,0 +1,5 @@
+aiohttp>=3.9.0
+pyrogram>=2.0.106
+tgcrypto>=1.2.5
+aiofiles>=23.2.1
+requests>=2.31.0
